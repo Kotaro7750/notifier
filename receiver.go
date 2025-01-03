@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -16,10 +17,16 @@ func (d dummyReceiver) GetChan() chan Notification {
 	return d.c
 }
 
-func (d dummyReceiver) Start() error {
-	for {
-		d.c <- Notification{Message: fmt.Sprintf("Hello from %s", d.id)}
-		time.Sleep(1 * time.Second)
+func (d dummyReceiver) Start(errCh chan error) func() error {
+	go func() {
+		for {
+			d.c <- Notification{Message: fmt.Sprintf("Hello from %s", d.id)}
+			time.Sleep(1 * time.Second)
+		}
+	}()
+
+	return func() error {
+		return nil
 	}
 }
 
@@ -32,18 +39,10 @@ func (h HTTPReceiver) GetChan() chan Notification {
 	return h.c
 }
 
-func (h HTTPReceiver) Start() error {
-	s := &http.Server{
-		Addr:    ":8080",
-		Handler: nil,
-	}
+func (h HTTPReceiver) Start(errCh chan error) func() error {
+	serveMux := http.NewServeMux()
 
-	http.HandleFunc("/notifications", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-			return
-		}
-
+	serveMux.HandleFunc("POST /notifications", func(w http.ResponseWriter, r *http.Request) {
 		var notification Notification
 		err := json.NewDecoder(r.Body).Decode(&notification)
 		if err != nil {
@@ -54,5 +53,16 @@ func (h HTTPReceiver) Start() error {
 		h.c <- notification
 	})
 
-	return s.ListenAndServe()
+	s := &http.Server{
+		Addr:    ":8080",
+		Handler: serveMux,
+	}
+
+	go func() {
+		errCh <- s.ListenAndServe()
+	}()
+
+	return func() error {
+		return s.Shutdown(context.Background())
+	}
 }

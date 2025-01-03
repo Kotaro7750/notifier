@@ -1,5 +1,10 @@
 package main
 
+import (
+	"fmt"
+	"time"
+)
+
 type Notification struct {
 	Message string `json:"message"`
 }
@@ -11,7 +16,7 @@ type Sender interface {
 
 type Receiver interface {
 	GetChan() chan Notification
-	Start() error
+	Start(errCh chan error) (stop func() error)
 }
 
 func main() {
@@ -32,13 +37,26 @@ func main() {
 	// receiverの起動
 	for _, receiver := range receivers {
 		go func() {
-			go receiver.Start()
-			c := receiver.GetChan()
-
 			for {
-				select {
-				case n := <-c:
-					routerCh <- n
+				errCh := make(chan error)
+				stop := receiver.Start(errCh)
+				c := receiver.GetChan()
+
+			SELECT_LOOP:
+				for {
+					select {
+					case n := <-c:
+						routerCh <- n
+
+					case err := <-errCh:
+						fmt.Println(err)
+						if err = stop(); err != nil {
+							fmt.Println(err)
+						}
+
+						time.Sleep(1 * time.Second)
+						break SELECT_LOOP
+					}
 				}
 			}
 		}()
