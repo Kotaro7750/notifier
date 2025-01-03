@@ -11,7 +11,7 @@ type Notification struct {
 
 type Sender interface {
 	GetChan() chan Notification
-	Start() error
+	Start(errCh chan error) (stop func() error)
 }
 
 type Receiver interface {
@@ -23,10 +23,33 @@ func main() {
 	sender1 := dummySender{c: make(chan Notification), id: "1"}
 	sender2 := dummySender{c: make(chan Notification), id: "2"}
 
-	go sender1.Start()
-	go sender2.Start()
+	senders := []Sender{sender1, sender2}
 
-	router := Router{senders: []Sender{sender1, sender2}}
+	// senderの起動
+	for _, sender := range senders {
+		go func() {
+			for {
+				errCh := make(chan error)
+				stop := sender.Start(errCh)
+
+			SELECT_LOOP:
+				for {
+					select {
+					case err := <-errCh:
+						fmt.Println(err)
+						if err = stop(); err != nil {
+							fmt.Println(err)
+						}
+
+						time.Sleep(1 * time.Second)
+						break SELECT_LOOP
+					}
+				}
+			}
+		}()
+	}
+
+	router := Router{senders: senders}
 	routerCh := make(chan Notification)
 
 	dr1 := dummyReceiver{c: make(chan Notification), id: "1"}
