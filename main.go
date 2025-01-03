@@ -1,7 +1,8 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
+	"os"
 	"time"
 )
 
@@ -18,6 +19,8 @@ type Receiver interface {
 	GetChan() chan Notification
 	Start(errCh chan error) (stop func() error)
 }
+
+var Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 func main() {
 	sender1 := dummySender{c: make(chan Notification), id: "1"}
@@ -36,9 +39,9 @@ func main() {
 				for {
 					select {
 					case err := <-errCh:
-						fmt.Println(err)
+						Logger.Error(err.Error())
 						if err = stop(); err != nil {
-							fmt.Println(err)
+							Logger.Error(err.Error())
 						}
 
 						time.Sleep(1 * time.Second)
@@ -72,9 +75,9 @@ func main() {
 						routerCh <- n
 
 					case err := <-errCh:
-						fmt.Println(err)
+						Logger.Error(err.Error())
 						if err = stop(); err != nil {
-							fmt.Println(err)
+							Logger.Error(err.Error())
 						}
 
 						time.Sleep(1 * time.Second)

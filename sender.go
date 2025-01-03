@@ -1,9 +1,5 @@
 package main
 
-import (
-	"fmt"
-)
-
 type dummySender struct {
 	id string
 	c  chan Notification
@@ -18,7 +14,7 @@ func (d dummySender) Start(errCh chan error) func() error {
 		for {
 			select {
 			case n := <-d.c:
-				fmt.Printf("Send in %s, message: %s\n", d.id, n.Message)
+				Logger.Info("Notify send from dummySender", "id", d.id, "message", n.Message)
 			}
 		}
 	}()

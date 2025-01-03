@@ -54,7 +54,7 @@ func (h HTTPReceiver) Start(errCh chan error) func() error {
 	})
 
 	s := &http.Server{
-		Addr:    ":8080",
+    Addr:    ":8080",
 		Handler: serveMux,
 	}
 
