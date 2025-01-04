@@ -5,7 +5,7 @@ import (
 )
 
 type Router struct {
-	senders []Sender
+	senders []*Sender
 }
 
 func (r Router) Route(n Notification) {
