@@ -13,11 +13,94 @@ type Notification struct {
 	Message string `json:"message"`
 }
 
-type StatefulChannel interface {
-	GetChan() chan Notification
-	Start(errCh chan error)
-	Stop() error
-	Shutdown() error
+type AbstractChannelComponent interface {
+	GetId() string
+	Start(ch chan Notification, done <-chan struct{}) <-chan error
+}
+
+type AutonomousChannelComponent struct {
+	chanComponent  AbstractChannelComponent
+	ch             chan Notification
+	shutdownCh     chan struct{}
+	isStarted      bool
+	isShuttingDown bool
+	lock           sync.Mutex
+}
+
+func NewAutonomousChannelComponent(chanComponent AbstractChannelComponent) *AutonomousChannelComponent {
+	return &AutonomousChannelComponent{
+		chanComponent:  chanComponent,
+		ch:             make(chan Notification),
+		shutdownCh:     make(chan struct{}),
+		isStarted:      false,
+		isShuttingDown: false,
+		lock:           sync.Mutex{},
+	}
+}
+
+func (acc *AutonomousChannelComponent) Start() <-chan struct{} {
+	Logger.Info("Start invoked", "id", acc.chanComponent.GetId())
+	acc.lock.Lock()
+	defer acc.lock.Unlock()
+
+	if acc.isStarted {
+		Logger.Info("Already started", "id", acc.chanComponent.GetId())
+		return nil
+	}
+	acc.isStarted = true
+	acc.shutdownCh = make(chan struct{})
+
+	completedCh := make(chan struct{})
+
+	go func(stopCh <-chan struct{}) {
+		defer close(completedCh)
+		for {
+			Logger.Info("Starting", "id", acc.chanComponent.GetId())
+			select {
+			case err := <-acc.chanComponent.Start(acc.ch, stopCh):
+				if err != nil {
+					Logger.Error("Error in channel component", "id", acc.chanComponent.GetId(), "error", err)
+				}
+
+				acc.lock.Lock()
+				if acc.isShuttingDown {
+					defer acc.lock.Unlock()
+					defer close(acc.ch)
+					Logger.Info("Shutting down", "id", acc.chanComponent.GetId())
+
+					acc.isStarted = false
+					acc.isShuttingDown = false
+					return
+				}
+				acc.lock.Unlock()
+			}
+
+			Logger.Info("Restart after 1s", "id", acc.chanComponent.GetId())
+
+			time.Sleep(1 * time.Second)
+		}
+	}(acc.shutdownCh)
+
+	return completedCh
+}
+
+func (acc *AutonomousChannelComponent) GetChannel() chan Notification {
+	return acc.ch
+}
+
+func (acc *AutonomousChannelComponent) Shutdown() {
+	Logger.Info("Shutdown invoked", "id", acc.chanComponent.GetId())
+	acc.lock.Lock()
+	defer acc.lock.Unlock()
+
+	if !acc.isStarted {
+		Logger.Info("Not started", "id", acc.chanComponent.GetId())
+		return
+	}
+	acc.isShuttingDown = true
+
+	close(acc.shutdownCh)
+	return
 }
 
 var Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -26,64 +109,38 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, os.Interrupt, os.Kill)
 
-	sender1 := NewSender(dummySenderImpl{id: "1"})
-	sender2 := NewSender(dummySenderImpl{id: "2"})
-	senders := []*Sender{&sender1, &sender2}
+	sender1 := NewAutonomousChannelComponent(&Sender{impl: &dummySenderImpl{id: "1"}})
+	sender2 := NewAutonomousChannelComponent(&Sender{impl: &dummySenderImpl{id: "2"}})
+	senders := []*AutonomousChannelComponent{sender1, sender2}
+	senderChs := make([]<-chan struct{}, len(senders))
 
-	dr1 := NewReceiver(dummyReceiverImpl{id: "1"})
-	httpr1 := NewReceiver(HTTPReceiverImpl{id: "2"})
-	receivers := []*Receiver{&dr1, &httpr1}
+	dr1 := NewAutonomousChannelComponent(&Receiver{impl: &dummyReceiverImpl{id: "1"}})
+	httpr1 := NewAutonomousChannelComponent(&Receiver{impl: &HTTPReceiverImpl{id: "1"}})
+	receivers := []*AutonomousChannelComponent{dr1, httpr1}
+	receiverChs := make([]<-chan struct{}, len(receivers))
 
-	statefulChannels := []StatefulChannel{&sender1, &sender2, &dr1, &httpr1}
+	for i, sender := range senders {
+		senderChs[i] = sender.Start()
+	}
 
-	for _, statefulChannel := range statefulChannels {
-		go func() {
-			for {
-				errCh := make(chan error)
-				statefulChannel.Start(errCh)
-
-			SELECT_LOOP:
-				for {
-					select {
-					case err := <-errCh:
-						Logger.Error(err.Error())
-						if err = statefulChannel.Stop(); err != nil {
-							Logger.Error(err.Error())
-						}
-
-						time.Sleep(1 * time.Second)
-						break SELECT_LOOP
-					}
-				}
-			}
-		}()
+	for i, receiver := range receivers {
+		receiverChs[i] = receiver.Start()
 	}
 
 	router := Router{senders: senders}
 	routerCh := make(chan Notification)
 
 	for _, receiver := range receivers {
-		go func() {
-		SELECT_LOOP:
-			for {
-				select {
-				case n, ok := <-receiver.GetChan():
-					if !ok {
-						Logger.Info("Channel closed")
-						break SELECT_LOOP
-					}
-					routerCh <- n
-				}
+		go func(r *AutonomousChannelComponent) {
+			for n := range r.GetChannel() {
+				routerCh <- n
 			}
-		}()
+		}(receiver)
 	}
 
 	go func() {
-		for {
-			select {
-			case n := <-routerCh:
-				router.Route(n)
-			}
+		for n := range routerCh {
+			router.Route(n)
 		}
 	}()
 
@@ -93,13 +150,14 @@ func main() {
 	Logger.Info("Shutting down receivers")
 
 	wg := sync.WaitGroup{}
-	for _, receiver := range receivers {
+	for i, receiver := range receivers {
+		Logger.Info("Shutting down receiver", "id", receiver.chanComponent.GetId())
 		wg.Add(1)
 		go func() {
-			if err := receiver.Shutdown(); err != nil {
-				Logger.Error(err.Error())
-			}
+			receiver.Shutdown()
+			<-receiverChs[i]
 			wg.Done()
+			Logger.Info("Complete shut down receiver", "id", receiver.chanComponent.GetId())
 		}()
 	}
 
@@ -109,13 +167,14 @@ func main() {
 	Logger.Info("Shutting down senders")
 
 	wg = sync.WaitGroup{}
-	for _, sender := range senders {
+	for i, sender := range senders {
+		Logger.Info("Shutting down sender", "id", sender.chanComponent.GetId())
 		wg.Add(1)
 		go func() {
-			if err := sender.Shutdown(); err != nil {
-				Logger.Error(err.Error())
-			}
+			sender.Shutdown()
+			<-senderChs[i]
 			wg.Done()
+			Logger.Info("Complete shut down sender", "id", sender.chanComponent.GetId())
 		}()
 	}
 

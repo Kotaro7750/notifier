@@ -1,93 +1,66 @@
 package main
 
 import (
-	"sync"
+	"fmt"
+	"time"
 )
 
 type SenderImpl interface {
-	Start(pickNotify func() <-chan Notification, errCh chan error) (stop func() error)
+	GetId() string
+	Start(inputCh <-chan Notification, done <-chan struct{}) <-chan error
 }
 
 type Sender struct {
-	sender    SenderImpl
-	c         chan Notification
-	stopFunc  func() error
-	isStarted bool
-	lock      *sync.Mutex
+	impl SenderImpl
 }
 
-func NewSender(sender SenderImpl) Sender {
-	return Sender{
-		sender:    sender,
-		c:         make(chan Notification),
-		isStarted: false,
-		lock:      &sync.Mutex{},
-		stopFunc:  func() error { return nil },
-	}
+func (s *Sender) Start(inputCh chan Notification, done <-chan struct{}) <-chan error {
+	return s.impl.Start(inputCh, done)
 }
 
-func (s Sender) GetChan() chan Notification {
-	return s.c
-}
-
-func (s *Sender) Start(errCh chan error) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if s.isStarted {
-		return
-	}
-
-	s.isStarted = true
-	s.stopFunc = s.sender.Start(func() <-chan Notification { return s.c }, errCh)
-	return
-}
-
-func (s *Sender) Stop() error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if !s.isStarted {
-		return nil
-	}
-
-	s.isStarted = false
-	return s.stopFunc()
-}
-
-func (s *Sender) Shutdown() error {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	if !s.isStarted {
-		return nil
-	}
-
-	s.isStarted = false
-	close(s.c)
-	return s.stopFunc()
+func (s *Sender) GetId() string {
+	return s.impl.GetId()
 }
 
 type dummySenderImpl struct {
 	id string
 }
 
-func (d dummySenderImpl) Start(pickNotify func() <-chan Notification, errCh chan error) func() error {
-	var stopChan = make(chan struct{})
+func (dsi *dummySenderImpl) GetId() string {
+	return fmt.Sprintf("dummySender %s", dsi.id)
+}
+
+func (dsi *dummySenderImpl) Start(inputCh <-chan Notification, done <-chan struct{}) <-chan error {
+	retCh := make(chan error)
+
+	shutdownFunc := func() {
+		time.Sleep(5 * time.Second)
+	}
+
 	go func() {
+		defer close(retCh)
+
+		c := time.Tick(10 * time.Second)
 		for {
 			select {
-			case n := <-pickNotify():
-				Logger.Info("Notify send from dummySender", "id", d.id, "message", n.Message)
-			case <-stopChan:
+			case n, ok := <-inputCh:
+				if !ok {
+					Logger.Info("inputCh closed", "id", dsi.id)
+				} else {
+					Logger.Info("Notify send from dummySender", "id", dsi.id, "message", n.Message)
+				}
+
+			case <-c:
+				shutdownFunc()
+				retCh <- fmt.Errorf("timeout")
+				return
+
+			case <-done:
+				shutdownFunc()
 				return
 			}
 		}
 	}()
 
-	return func() error {
-		stopChan <- struct{}{}
-		close(stopChan)
-		return nil
-	}
+	return retCh
 }

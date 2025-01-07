@@ -5,7 +5,7 @@ import (
 )
 
 type Router struct {
-	senders []*Sender
+	senders []*AutonomousChannelComponent
 }
 
 func (r Router) Route(n Notification) {
@@ -14,7 +14,7 @@ func (r Router) Route(n Notification) {
 	for _, sender := range r.senders {
 		wg.Add(1)
 		go func() {
-			c := sender.GetChan()
+			c := sender.GetChannel()
 
 			c <- n
 			wg.Done()
