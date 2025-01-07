@@ -109,14 +109,23 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, os.Interrupt, os.Kill)
 
-	sender1 := NewAutonomousChannelComponent(&Sender{impl: &dummySenderImpl{id: "1"}})
-	sender2 := NewAutonomousChannelComponent(&Sender{impl: &dummySenderImpl{id: "2"}})
-	senders := []*AutonomousChannelComponent{sender1, sender2}
+	receivers, senders, err := Build(
+		[]AbstractChannelComponentConfig{
+			{id: "1", kind: "dummy"},
+			{id: "1", kind: "HTTP"},
+		},
+		[]AbstractChannelComponentConfig{
+			{id: "1", kind: "dummy"},
+			{id: "2", kind: "dummy"},
+		})
+
+	if err != nil {
+		Logger.Error("Error in build", "error", err)
+		return
+	}
+
 	senderChs := make([]<-chan struct{}, len(senders))
 
-	dr1 := NewAutonomousChannelComponent(&Receiver{impl: &dummyReceiverImpl{id: "1"}})
-	httpr1 := NewAutonomousChannelComponent(&Receiver{impl: &HTTPReceiverImpl{id: "1"}})
-	receivers := []*AutonomousChannelComponent{dr1, httpr1}
 	receiverChs := make([]<-chan struct{}, len(receivers))
 
 	for i, sender := range senders {
