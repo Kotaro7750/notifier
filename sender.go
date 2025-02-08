@@ -1,7 +1,13 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/rs/cors"
+	"net/http"
+	"sync"
 	"time"
 )
 
@@ -59,6 +65,121 @@ func (dsi *dummySenderImpl) Start(inputCh <-chan Notification, done <-chan struc
 				shutdownFunc()
 				return
 			}
+		}
+	}()
+
+	return retCh
+}
+
+var subscriptionMap = sync.Map{}
+
+type webPushSenderImpl struct {
+	id string
+}
+
+func (wpsi *webPushSenderImpl) GetId() string {
+	return fmt.Sprintf("webPushSender %s", wpsi.id)
+}
+
+func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan struct{}) <-chan error {
+	retCh := make(chan error)
+
+	vapidPrivateKey, vapidPublicKey, _ := webpush.GenerateVAPIDKeys()
+
+	serveMux := http.NewServeMux()
+
+	serveMux.HandleFunc("GET /publickey", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(vapidPublicKey))
+	})
+
+	serveMux.HandleFunc("POST /subscriptions", func(w http.ResponseWriter, r *http.Request) {
+		var subscription webpush.Subscription
+		err := json.NewDecoder(r.Body).Decode(&subscription)
+		if err != nil {
+			Logger.Error("Decoding posted subscription to JSON failed", "id", wpsi.GetId(), "err", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		subscriptionMap.Store(subscription.Endpoint, subscription)
+
+		Logger.Info("Receive subscription", "id", wpsi.GetId())
+		w.WriteHeader(http.StatusOK)
+	})
+
+	serveMux.HandleFunc("GET /subscriptions", func(w http.ResponseWriter, r *http.Request) {
+		endpoints := make([]string, 0)
+
+		subscriptionMap.Range(func(key, value interface{}) bool {
+			endpoints = append(endpoints, key.(string))
+			return true
+		})
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(endpoints)
+	})
+
+	s := &http.Server{
+		Addr: ":8090",
+		// TODO セキュリティ的によくないので環境変数経由で指定できるように設定する
+		Handler: cors.AllowAll().Handler(serveMux),
+	}
+
+	shutdownFunc := func() {
+		s.Shutdown(context.Background())
+	}
+
+	errCh := make(chan error)
+	go func() {
+		defer close(errCh)
+		err := s.ListenAndServe()
+		errCh <- err
+	}()
+
+	go func() {
+		for {
+			select {
+			case n, ok := <-inputCh:
+				if !ok {
+					Logger.Info("inputCh closed", "id", wpsi.id)
+				} else {
+					subscriptionMap.Range(func(key, value interface{}) bool {
+						subscription := value.(webpush.Subscription)
+
+						res, err := webpush.SendNotification([]byte(n.Message), &subscription, &webpush.Options{
+							Subscriber:      "kotaroarata1999@gmail.com",
+							VAPIDPublicKey:  vapidPublicKey,
+							VAPIDPrivateKey: vapidPrivateKey,
+						})
+
+						Logger.Info("Notify send to WebPush Endpoint from webPushSender", "id", wpsi.id, "response", res.Status)
+
+						if err != nil {
+							Logger.Error("SendNotification failed", "id", wpsi.GetId(), "err", err)
+							errCh <- err
+							return false
+						}
+
+						return true
+					})
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	go func() {
+		defer close(retCh)
+		select {
+		case err := <-errCh:
+			shutdownFunc()
+			retCh <- err
+			return
+		case <-done:
+			shutdownFunc()
+			return
 		}
 	}()
 

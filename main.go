@@ -111,12 +111,13 @@ func main() {
 
 	receivers, senders, err := Build(
 		[]AbstractChannelComponentConfig{
-			{id: "1", kind: "dummy"},
+			// {id: "1", kind: "dummy"},
 			{id: "1", kind: "HTTP"},
 		},
 		[]AbstractChannelComponentConfig{
-			{id: "1", kind: "dummy"},
-			{id: "2", kind: "dummy"},
+			// {id: "1", kind: "dummy"},
+			// {id: "2", kind: "dummy"},
+			{id: "1", kind: "webPush"},
 		})
 
 	if err != nil {

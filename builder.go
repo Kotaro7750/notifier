@@ -23,6 +23,10 @@ func init() {
 	senderBuilderMap["dummy"] = func(id string) AbstractChannelComponent {
 		return &Sender{&dummySenderImpl{id: id}}
 	}
+
+	senderBuilderMap["webPush"] = func(id string) AbstractChannelComponent {
+		return &Sender{&webPushSenderImpl{id: id}}
+	}
 }
 
 func Build(receiverConfigs []AbstractChannelComponentConfig, senderConfigs []AbstractChannelComponentConfig) (receivers []*AutonomousChannelComponent, senders []*AutonomousChannelComponent, err error) {
