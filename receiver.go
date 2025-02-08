@@ -65,7 +65,8 @@ func (dri *dummyReceiverImpl) Start(outputCh chan<- Notification, done <-chan st
 }
 
 type HTTPReceiverImpl struct {
-	id string
+	id         string
+	listenAddr string
 }
 
 func (hri *HTTPReceiverImpl) GetId() string {
@@ -89,7 +90,7 @@ func (hri HTTPReceiverImpl) Start(outputCh chan<- Notification, done <-chan stru
 	})
 
 	s := &http.Server{
-		Addr:    ":8080",
+		Addr:    hri.listenAddr,
 		Handler: serveMux,
 	}
 

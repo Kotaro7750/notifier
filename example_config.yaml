@@ -1,0 +1,12 @@
+receivers:
+  - id: 1
+    kind: dummy
+  - id: 2
+    kind: HTTP
+    properties:
+      listenAddress: :8080
+senders: 
+  - id: 1
+    kind: webPush
+    properties:
+      listenAddress: :8091

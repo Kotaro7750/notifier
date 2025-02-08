@@ -74,7 +74,9 @@ func (dsi *dummySenderImpl) Start(inputCh <-chan Notification, done <-chan struc
 var subscriptionMap = sync.Map{}
 
 type webPushSenderImpl struct {
-	id string
+	id                string
+	listenAddress     string
+	defaultSubscriber string
 }
 
 func (wpsi *webPushSenderImpl) GetId() string {
@@ -121,7 +123,7 @@ func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan st
 	})
 
 	s := &http.Server{
-		Addr: ":8090",
+		Addr: wpsi.listenAddress,
 		// TODO セキュリティ的によくないので環境変数経由で指定できるように設定する
 		Handler: cors.AllowAll().Handler(serveMux),
 	}
@@ -148,7 +150,7 @@ func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan st
 						subscription := value.(webpush.Subscription)
 
 						res, err := webpush.SendNotification([]byte(n.Message), &subscription, &webpush.Options{
-							Subscriber:      "kotaroarata1999@gmail.com",
+							Subscriber:      wpsi.defaultSubscriber,
 							VAPIDPublicKey:  vapidPublicKey,
 							VAPIDPrivateKey: vapidPrivateKey,
 						})

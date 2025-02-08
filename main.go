@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"gopkg.in/yaml.v3"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -11,6 +13,43 @@ import (
 
 type Notification struct {
 	Message string `json:"message"`
+}
+
+type Configuration struct {
+	ReceiverConfigurations []AbstractChannelComponentConfig `yaml:"receivers,flow"`
+	SenderConfigurations   []AbstractChannelComponentConfig `yaml:"senders,flow"`
+}
+
+func validateConfiguration(config Configuration) error {
+	if config.ReceiverConfigurations == nil {
+		return fmt.Errorf("receivers is not defined")
+	}
+
+	if len(config.ReceiverConfigurations) == 0 {
+		return fmt.Errorf("At least one receiver is required")
+	}
+
+	for _, receiverConfig := range config.ReceiverConfigurations {
+		if err := receiverConfig.validate(); err != nil {
+			return err
+		}
+	}
+
+	if config.SenderConfigurations == nil {
+		return fmt.Errorf("senders is not defined")
+	}
+
+	if len(config.SenderConfigurations) == 0 {
+		return fmt.Errorf("At least one sender is required")
+	}
+
+	for _, senderConfig := range config.SenderConfigurations {
+		if err := senderConfig.validate(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 type AbstractChannelComponent interface {
@@ -106,19 +145,34 @@ func (acc *AutonomousChannelComponent) Shutdown() {
 var Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
 func main() {
+	if len(os.Args) < 2 {
+		Logger.Error("Configuration file is required")
+		return
+	}
+
+	configFileNAme := os.Args[1]
+	fileContent, err := os.ReadFile(configFileNAme)
+	if err != nil {
+		Logger.Error("Error reading file", "err", err)
+		return
+	}
+
+	config := Configuration{}
+	err = yaml.Unmarshal(fileContent, &config)
+	if err != nil {
+		Logger.Error("Error parsing YAML file", "err", err)
+		return
+	}
+
+	if err := validateConfiguration(config); err != nil {
+		Logger.Error("Invalid configuration", "err", err)
+		return
+	}
+
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, os.Interrupt, os.Kill)
 
-	receivers, senders, err := Build(
-		[]AbstractChannelComponentConfig{
-			// {id: "1", kind: "dummy"},
-			{id: "1", kind: "HTTP"},
-		},
-		[]AbstractChannelComponentConfig{
-			// {id: "1", kind: "dummy"},
-			// {id: "2", kind: "dummy"},
-			{id: "1", kind: "webPush"},
-		})
+	receivers, senders, err := Build(config.ReceiverConfigurations, config.SenderConfigurations)
 
 	if err != nil {
 		Logger.Error("Error in build", "error", err)
