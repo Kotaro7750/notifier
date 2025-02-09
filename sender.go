@@ -110,6 +110,26 @@ func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan st
 		w.WriteHeader(http.StatusOK)
 	})
 
+	serveMux.HandleFunc("DELETE /subscriptions", func(w http.ResponseWriter, r *http.Request) {
+		var subscription webpush.Subscription
+		err := json.NewDecoder(r.Body).Decode(&subscription)
+		if err != nil {
+			Logger.Error("Decoding passed subscription to JSON failed", "id", wpsi.GetId(), "err", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		_, ok := subscriptionMap.Load(subscription.Endpoint)
+		if ok {
+			Logger.Info("Delete subscription", "id", wpsi.GetId())
+			subscriptionMap.Delete(subscription.Endpoint)
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			Logger.Info("Subscription not found. Additional operation is not needed", "id", wpsi.GetId())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
 	serveMux.HandleFunc("GET /subscriptions", func(w http.ResponseWriter, r *http.Request) {
 		endpoints := make([]string, 0)
 
