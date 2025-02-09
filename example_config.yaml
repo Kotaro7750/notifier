@@ -10,3 +10,4 @@ senders:
     kind: webPush
     properties:
       listenAddress: :8091
+      repositoryType: DynamoDB
