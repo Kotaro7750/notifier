@@ -1,79 +1,126 @@
-package main
+package sender
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
-	"time"
+
+	"github.com/Kotaro7750/notifier/abstraction"
+	"github.com/Kotaro7750/notifier/notification"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/rs/cors"
 )
 
-type SenderImpl interface {
-	GetId() string
-	Start(inputCh <-chan Notification, done <-chan struct{}) <-chan error
-}
-
-type Sender struct {
-	impl SenderImpl
-}
-
-func (s *Sender) Start(inputCh chan Notification, done <-chan struct{}) <-chan error {
-	return s.impl.Start(inputCh, done)
-}
-
-func (s *Sender) GetId() string {
-	return s.impl.GetId()
-}
-
-type dummySenderImpl struct {
-	id string
-}
-
-func (dsi *dummySenderImpl) GetId() string {
-	return fmt.Sprintf("dummySender %s", dsi.id)
-}
-
-func (dsi *dummySenderImpl) Start(inputCh <-chan Notification, done <-chan struct{}) <-chan error {
-	retCh := make(chan error)
-
-	shutdownFunc := func() {
-		time.Sleep(5 * time.Second)
+func WebPushSenderBuilder(id string, properties map[string]interface{}) (abstraction.AbstractChannelComponent, error) {
+	listenAddr, ok := properties["listenAddress"]
+	if !ok {
+		return nil, fmt.Errorf("listenAddress is required")
 	}
 
-	go func() {
-		defer close(retCh)
+	listenAddrStr, ok := listenAddr.(string)
+	if !ok {
+		return nil, fmt.Errorf("listenAddress should be string")
+	}
 
-		c := time.Tick(10 * time.Second)
-		for {
-			select {
-			case n, ok := <-inputCh:
-				if !ok {
-					Logger.Info("inputCh closed", "id", dsi.id)
-				} else {
-					Logger.Info("Notify send from dummySender", "id", dsi.id, "message", n.Message)
-				}
-
-			case <-c:
-				shutdownFunc()
-				retCh <- fmt.Errorf("timeout")
-				return
-
-			case <-done:
-				shutdownFunc()
-				return
-			}
+	defaultSubscriberStr := ""
+	defaultSubscriber, ok := properties["defaultSubscriber"]
+	if ok {
+		defaultSubscriberStr, ok = defaultSubscriber.(string)
+		if !ok {
+			return nil, fmt.Errorf("defaultSubscriber should be string")
 		}
-	}()
+	}
 
-	return retCh
+	repositoryType, ok := properties["repositoryType"]
+	if !ok {
+		return nil, fmt.Errorf("repositoryType is required")
+	}
+
+	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("ap-northeast-1"))
+	if err != nil {
+		return nil, fmt.Errorf("Load AWS config failed. err: %s", err)
+	}
+	dynamodbClient := dynamodb.NewFromConfig(cfg)
+
+	var subscriptionRepository SubscriptionRepository
+
+	switch repositoryType {
+	case "DynamoDB":
+		subscriptionRepository = NewDynamoDBSubscriptionRepository(dynamodbClient)
+	case "InMemory":
+		subscriptionRepository = NewInMemorySubscriptionRepository()
+	default:
+		return nil, fmt.Errorf("repositoryType is invalid. repositoryType: %s", repositoryType)
+	}
+
+	output, err := dynamodbClient.GetItem(context.Background(), &dynamodb.GetItemInput{
+		TableName: aws.String("notifier-config"),
+		Key: map[string]types.AttributeValue{
+			"Key": &types.AttributeValueMemberS{
+				Value: "vapid",
+			},
+		},
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("GetItem for vapid failed. err: %s", err)
+	}
+
+	var vapidPrivateKey, vapidPublicKey string
+
+	if output.Item == nil {
+		vapidPrivateKey, vapidPublicKey, _ = webpush.GenerateVAPIDKeys()
+
+		_, err := dynamodbClient.PutItem(context.Background(), &dynamodb.PutItemInput{
+			TableName: aws.String("notifier-config"),
+			Item: map[string]types.AttributeValue{
+				"Key": &types.AttributeValueMemberS{
+					Value: "vapid",
+				},
+				"Value": &types.AttributeValueMemberS{
+					Value: fmt.Sprintf("%s %s", vapidPrivateKey, vapidPublicKey),
+				},
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("PutItem for vapid failed. err: %s", err)
+		}
+
+	} else {
+		vapid := struct {
+			Key   string `dynamodbav:"Key"`
+			Value string `dynamodbav:"Value"`
+		}{}
+
+		err = attributevalue.UnmarshalMap(output.Item, &vapid)
+		if err != nil {
+			return nil, fmt.Errorf("Unmarshal for vapid failed. err: %s", err)
+		}
+
+		splitted := strings.Split(vapid.Value, " ")
+		vapidPrivateKey = splitted[0]
+		vapidPublicKey = splitted[1]
+	}
+
+	return NewSender(&webPushSenderImpl{
+		id:                     id,
+		logger:                 nil,
+		listenAddress:          listenAddrStr,
+		defaultSubscriber:      defaultSubscriberStr,
+		subscriptionRepository: subscriptionRepository,
+		vapidPrivateKey:        vapidPrivateKey,
+		vapidPublicKey:         vapidPublicKey,
+	}), nil
 }
 
 type SubscriptionRepository interface {
@@ -200,6 +247,7 @@ func (ddbr *DynamoDBSubscriptionRepository) Delete(subscription webpush.Subscrip
 
 type webPushSenderImpl struct {
 	id                     string
+	logger                 *slog.Logger
 	listenAddress          string
 	defaultSubscriber      string
 	vapidPrivateKey        string
@@ -208,10 +256,18 @@ type webPushSenderImpl struct {
 }
 
 func (wpsi *webPushSenderImpl) GetId() string {
-	return fmt.Sprintf("webPushSender %s", wpsi.id)
+	return fmt.Sprintf("%s", wpsi.id)
 }
 
-func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan struct{}) <-chan error {
+func (wpsi *webPushSenderImpl) GetLogger() *slog.Logger {
+	return wpsi.logger
+}
+
+func (wpsi *webPushSenderImpl) SetLogger(logger *slog.Logger) {
+	wpsi.logger = logger
+}
+
+func (wpsi *webPushSenderImpl) Start(inputCh <-chan notification.Notification, done <-chan struct{}) <-chan error {
 	retCh := make(chan error)
 
 	serveMux := http.NewServeMux()
@@ -225,19 +281,19 @@ func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan st
 		var subscription webpush.Subscription
 		err := json.NewDecoder(r.Body).Decode(&subscription)
 		if err != nil {
-			Logger.Error("Decoding posted subscription to JSON failed", "id", wpsi.GetId(), "err", err)
+			wpsi.GetLogger().Error("Decoding posted subscription to JSON failed", "err", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
 		err = wpsi.subscriptionRepository.Store(subscription)
 		if err != nil {
-			Logger.Error("Store subscription to repository failed", "id", wpsi.GetId(), "err", err)
+			wpsi.GetLogger().Error("Store subscription to repository failed", "err", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		Logger.Info("Receive subscription", "id", wpsi.GetId())
+		wpsi.GetLogger().Info("Receive subscription")
 		w.WriteHeader(http.StatusOK)
 	})
 
@@ -245,19 +301,19 @@ func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan st
 		var subscription webpush.Subscription
 		err := json.NewDecoder(r.Body).Decode(&subscription)
 		if err != nil {
-			Logger.Error("Decoding passed subscription to JSON failed", "id", wpsi.GetId(), "err", err)
+			wpsi.GetLogger().Error("Decoding passed subscription to JSON failed", "err", err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
 		err = wpsi.subscriptionRepository.Delete(subscription)
 		if err != nil {
-			Logger.Error("Delete subscription from repository failed", "id", wpsi.GetId(), "err", err)
+			wpsi.GetLogger().Error("Delete subscription from repository failed", "err", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 
-		Logger.Info("Delete subscription", "id", wpsi.GetId())
+		wpsi.GetLogger().Info("Delete subscription")
 
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -266,7 +322,7 @@ func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan st
 	serveMux.HandleFunc("GET /subscriptions", func(w http.ResponseWriter, r *http.Request) {
 		subscriptions, err := wpsi.subscriptionRepository.LoadAll()
 		if err != nil {
-			Logger.Error("LoadAll subscription from repository failed", "id", wpsi.GetId(), "err", err)
+			wpsi.GetLogger().Error("LoadAll subscription from repository failed", "err", err)
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
@@ -303,12 +359,12 @@ func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan st
 			select {
 			case n, ok := <-inputCh:
 				if !ok {
-					Logger.Info("inputCh closed", "id", wpsi.id)
+					wpsi.GetLogger().Info("inputCh closed")
 				} else {
 					subscriptions, err := wpsi.subscriptionRepository.LoadAll()
 
 					if err != nil {
-						Logger.Error("LoadAll subscription from repository failed", "id", wpsi.GetId(), "err", err)
+						wpsi.GetLogger().Error("LoadAll subscription from repository failed", "err", err)
 						errCh <- err
 						return
 					}
@@ -320,10 +376,10 @@ func (wpsi *webPushSenderImpl) Start(inputCh <-chan Notification, done <-chan st
 							VAPIDPrivateKey: wpsi.vapidPrivateKey,
 						})
 
-						Logger.Info("Notify send to WebPush Endpoint from webPushSender", "id", wpsi.id, "response", res.Status)
+						wpsi.GetLogger().Info("Notify send to WebPush Endpoint from webPushSender", "response", res.Status)
 
 						if err != nil {
-							Logger.Error("SendNotification failed", "id", wpsi.GetId(), "err", err)
+							wpsi.GetLogger().Error("SendNotification failed", "err", err)
 							errCh <- err
 							break
 						}
