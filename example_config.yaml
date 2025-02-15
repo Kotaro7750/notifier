@@ -1,6 +1,9 @@
 receivers:
   - id: 1
     kind: dummy
+    properties:
+      errorInterval: 10s
+      shutdownDuration: 0s
   - id: 2
     kind: HTTP
     properties:
@@ -8,8 +11,11 @@ receivers:
 senders: 
   - id: 1
     kind: dummy
-  # - id: 1
-  #   kind: webPush
-  #   properties:
-  #     listenAddress: :8091
-  #     repositoryType: DynamoDB
+    properties:
+      errorInterval: 0s
+      shutdownDuration: 10s
+  - id: 1
+    kind: webPush
+    properties:
+      listenAddress: :8091
+      repositoryType: InMemory
