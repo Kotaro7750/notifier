@@ -46,70 +46,68 @@ func WebPushSenderBuilder(id string, properties map[string]interface{}) (abstrac
 		return nil, fmt.Errorf("repositoryType is required")
 	}
 
-	cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("ap-northeast-1"))
-	if err != nil {
-		return nil, fmt.Errorf("Load AWS config failed. err: %s", err)
-	}
-	dynamodbClient := dynamodb.NewFromConfig(cfg)
-
 	var subscriptionRepository SubscriptionRepository
+	vapidPrivateKey, vapidPublicKey, _ := webpush.GenerateVAPIDKeys()
 
 	switch repositoryType {
 	case "DynamoDB":
+		cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("ap-northeast-1"))
+		if err != nil {
+			return nil, fmt.Errorf("Load AWS config failed. err: %s", err)
+		}
+		dynamodbClient := dynamodb.NewFromConfig(cfg)
+
 		subscriptionRepository = NewDynamoDBSubscriptionRepository(dynamodbClient)
+
+		output, err := dynamodbClient.GetItem(context.Background(), &dynamodb.GetItemInput{
+			TableName: aws.String("notifier-config"),
+			Key: map[string]types.AttributeValue{
+				"Key": &types.AttributeValueMemberS{
+					Value: "vapid",
+				},
+			},
+		})
+
+		if err != nil {
+			return nil, fmt.Errorf("GetItem for vapid failed. err: %s", err)
+		}
+
+		if output.Item == nil {
+			_, err := dynamodbClient.PutItem(context.Background(), &dynamodb.PutItemInput{
+				TableName: aws.String("notifier-config"),
+				Item: map[string]types.AttributeValue{
+					"Key": &types.AttributeValueMemberS{
+						Value: "vapid",
+					},
+					"Value": &types.AttributeValueMemberS{
+						Value: fmt.Sprintf("%s %s", vapidPrivateKey, vapidPublicKey),
+					},
+				},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("PutItem for vapid failed. err: %s", err)
+			}
+
+		} else {
+			vapid := struct {
+				Key   string `dynamodbav:"Key"`
+				Value string `dynamodbav:"Value"`
+			}{}
+
+			err = attributevalue.UnmarshalMap(output.Item, &vapid)
+			if err != nil {
+				return nil, fmt.Errorf("Unmarshal for vapid failed. err: %s", err)
+			}
+
+			splitted := strings.Split(vapid.Value, " ")
+			vapidPrivateKey = splitted[0]
+			vapidPublicKey = splitted[1]
+		}
+
 	case "InMemory":
 		subscriptionRepository = NewInMemorySubscriptionRepository()
 	default:
 		return nil, fmt.Errorf("repositoryType is invalid. repositoryType: %s", repositoryType)
-	}
-
-	output, err := dynamodbClient.GetItem(context.Background(), &dynamodb.GetItemInput{
-		TableName: aws.String("notifier-config"),
-		Key: map[string]types.AttributeValue{
-			"Key": &types.AttributeValueMemberS{
-				Value: "vapid",
-			},
-		},
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("GetItem for vapid failed. err: %s", err)
-	}
-
-	var vapidPrivateKey, vapidPublicKey string
-
-	if output.Item == nil {
-		vapidPrivateKey, vapidPublicKey, _ = webpush.GenerateVAPIDKeys()
-
-		_, err := dynamodbClient.PutItem(context.Background(), &dynamodb.PutItemInput{
-			TableName: aws.String("notifier-config"),
-			Item: map[string]types.AttributeValue{
-				"Key": &types.AttributeValueMemberS{
-					Value: "vapid",
-				},
-				"Value": &types.AttributeValueMemberS{
-					Value: fmt.Sprintf("%s %s", vapidPrivateKey, vapidPublicKey),
-				},
-			},
-		})
-		if err != nil {
-			return nil, fmt.Errorf("PutItem for vapid failed. err: %s", err)
-		}
-
-	} else {
-		vapid := struct {
-			Key   string `dynamodbav:"Key"`
-			Value string `dynamodbav:"Value"`
-		}{}
-
-		err = attributevalue.UnmarshalMap(output.Item, &vapid)
-		if err != nil {
-			return nil, fmt.Errorf("Unmarshal for vapid failed. err: %s", err)
-		}
-
-		splitted := strings.Split(vapid.Value, " ")
-		vapidPrivateKey = splitted[0]
-		vapidPublicKey = splitted[1]
 	}
 
 	return NewSender(&webPushSenderImpl{
