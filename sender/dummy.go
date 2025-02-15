@@ -50,7 +50,7 @@ func (dsi *dummySenderImpl) Start(inputCh <-chan notification.Notification, done
 				if !ok {
 					dsi.GetLogger().Info("inputCh closed")
 				} else {
-					dsi.GetLogger().Info("Notify send from dummySender", "message", n.Message)
+					dsi.GetLogger().Info("Notify send from dummySender", "notification", n)
 				}
 
 			case <-c:

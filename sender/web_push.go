@@ -367,8 +367,15 @@ func (wpsi *webPushSenderImpl) Start(inputCh <-chan notification.Notification, d
 						return
 					}
 
+					data, err := json.Marshal(n)
+					if err != nil {
+						wpsi.GetLogger().Error("Marshal notification failed", "err", err)
+						errCh <- err
+						return
+					}
+
 					for _, subscription := range subscriptions {
-						res, err := webpush.SendNotification([]byte(n.Message), &subscription, &webpush.Options{
+						res, err := webpush.SendNotification(data, &subscription, &webpush.Options{
 							Subscriber:      wpsi.defaultSubscriber,
 							VAPIDPublicKey:  wpsi.vapidPublicKey,
 							VAPIDPrivateKey: wpsi.vapidPrivateKey,

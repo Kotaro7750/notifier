@@ -48,7 +48,11 @@ func (dri *dummyReceiverImpl) Start(outputCh chan<- notification.Notification, d
 		for {
 			select {
 			case <-c:
-				outputCh <- notification.Notification{Message: fmt.Sprintf("Hello from %s", dri.id)}
+				outputCh <- notification.Notification{
+					Title:    "Dummy Title",
+					Message:  fmt.Sprintf("Hello from %s", dri.id),
+					Severity: slog.LevelInfo,
+				}
 
 			case <-d:
 				shutdownFunc()
