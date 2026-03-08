@@ -19,6 +19,8 @@ func init() {
 
 	senderBuilderMap["dummy"] = sender.DummySenderBuilder
 
+	senderBuilderMap["datadog_event"] = sender.DatadogEventSenderBuilder
+
 	senderBuilderMap["webPush"] = sender.WebPushSenderBuilder
 }
 
