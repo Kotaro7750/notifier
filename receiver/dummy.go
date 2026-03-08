@@ -7,18 +7,62 @@ import (
 
 	"github.com/Kotaro7750/notifier/abstraction"
 	"github.com/Kotaro7750/notifier/notification"
+
+	"gopkg.in/yaml.v3"
 )
 
-func DummyReceiverBuilder(id string, properties map[string]interface{}) (abstraction.AbstractChannelComponent, error) {
+type DummyReceiverProperties struct {
+	ErrorInterval    time.Duration `yaml:"errorInterval"`
+	ShutdownDuration time.Duration `yaml:"shutdownDuration"`
+	ReceiveInterval  time.Duration `yaml:"receiveInterval"`
+}
+
+func NewDummyReceiverProperties() DummyReceiverProperties {
+	return DummyReceiverProperties{
+		ErrorInterval:    10 * time.Second,
+		ShutdownDuration: 6 * time.Second,
+		ReceiveInterval:  1 * time.Second,
+	}
+}
+
+func (p DummyReceiverProperties) Validate() error {
+	if p.ErrorInterval < 0 {
+		return fmt.Errorf("errorInterval should be greater than or equal to 0")
+	}
+	if p.ShutdownDuration < 0 {
+		return fmt.Errorf("shutdownDuration should be greater than or equal to 0")
+	}
+	if p.ReceiveInterval <= 0 {
+		return fmt.Errorf("receiveInterval should be greater than 0")
+	}
+
+	return nil
+}
+
+func DummyReceiverBuilder(id string, properties yaml.Node) (abstraction.AbstractChannelComponent, error) {
+	parsedProperties := NewDummyReceiverProperties()
+	if err := abstraction.DecodeProperties(properties, &parsedProperties); err != nil {
+		return nil, err
+	}
+	if err := parsedProperties.Validate(); err != nil {
+		return nil, err
+	}
+
 	return NewReceiver(&dummyReceiverImpl{
-		id:     id,
-		logger: nil,
+		id:               id,
+		logger:           nil,
+		errorInterval:    parsedProperties.ErrorInterval,
+		shutdownDuration: parsedProperties.ShutdownDuration,
+		receiveInterval:  parsedProperties.ReceiveInterval,
 	}), nil
 }
 
 type dummyReceiverImpl struct {
-	id     string
-	logger *slog.Logger
+	id               string
+	logger           *slog.Logger
+	errorInterval    time.Duration
+	shutdownDuration time.Duration
+	receiveInterval  time.Duration
 }
 
 func (dri *dummyReceiverImpl) GetId() string {
@@ -37,24 +81,36 @@ func (dri *dummyReceiverImpl) Start(outputCh chan<- notification.Notification, d
 	retCh := make(chan error)
 
 	shutdownFunc := func() {
-		time.Sleep(6 * time.Second)
+		time.Sleep(dri.shutdownDuration)
 	}
 
 	go func() {
 		defer close(retCh)
 
-		c := time.Tick(1 * time.Second)
-		d := time.Tick(10 * time.Second)
+		var receiveTickCh <-chan time.Time
+		if dri.receiveInterval > 0 {
+			receiveTicker := time.NewTicker(dri.receiveInterval)
+			defer receiveTicker.Stop()
+			receiveTickCh = receiveTicker.C
+		}
+
+		var errorTickCh <-chan time.Time
+		if dri.errorInterval > 0 {
+			errorTicker := time.NewTicker(dri.errorInterval)
+			defer errorTicker.Stop()
+			errorTickCh = errorTicker.C
+		}
+
 		for {
 			select {
-			case <-c:
+			case <-receiveTickCh:
 				outputCh <- notification.Notification{
 					Title:    "Dummy Title",
 					Message:  fmt.Sprintf("Hello from %s", dri.id),
 					Severity: slog.LevelInfo,
 				}
 
-			case <-d:
+			case <-errorTickCh:
 				shutdownFunc()
 				retCh <- fmt.Errorf("timeout")
 				return

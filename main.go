@@ -1,8 +1,8 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,6 +12,8 @@ import (
 	"github.com/Kotaro7750/notifier/abstraction"
 	"github.com/Kotaro7750/notifier/builder"
 	"github.com/Kotaro7750/notifier/notification"
+
+	"gopkg.in/yaml.v3"
 )
 
 type Configuration struct {
@@ -67,7 +69,9 @@ func main() {
 	}
 
 	config := Configuration{}
-	err = yaml.Unmarshal(fileContent, &config)
+	decoder := yaml.NewDecoder(bytes.NewReader(fileContent))
+	decoder.KnownFields(true)
+	err = decoder.Decode(&config)
 	if err != nil {
 		Logger.Error("Error parsing YAML file", "err", err)
 		return

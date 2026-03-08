@@ -19,37 +19,41 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/rs/cors"
+	"gopkg.in/yaml.v3"
 )
 
-func WebPushSenderBuilder(id string, properties map[string]interface{}) (abstraction.AbstractChannelComponent, error) {
-	listenAddr, ok := properties["listenAddress"]
-	if !ok {
-		return nil, fmt.Errorf("listenAddress is required")
+type WebPushSenderProperties struct {
+	ListenAddress     string `yaml:"listenAddress"`
+	DefaultSubscriber string `yaml:"defaultSubscriber"`
+	RepositoryType    string `yaml:"repositoryType"`
+}
+
+func (p WebPushSenderProperties) Validate() error {
+	if p.ListenAddress == "" {
+		return fmt.Errorf("listenAddress is required")
 	}
 
-	listenAddrStr, ok := listenAddr.(string)
-	if !ok {
-		return nil, fmt.Errorf("listenAddress should be string")
+	if p.RepositoryType == "" {
+		return fmt.Errorf("repositoryType is required")
 	}
 
-	defaultSubscriberStr := ""
-	defaultSubscriber, ok := properties["defaultSubscriber"]
-	if ok {
-		defaultSubscriberStr, ok = defaultSubscriber.(string)
-		if !ok {
-			return nil, fmt.Errorf("defaultSubscriber should be string")
-		}
+	return nil
+}
+
+func WebPushSenderBuilder(id string, properties yaml.Node) (abstraction.AbstractChannelComponent, error) {
+	var parsedProperties WebPushSenderProperties
+	if err := abstraction.DecodeProperties(properties, &parsedProperties); err != nil {
+		return nil, err
 	}
 
-	repositoryType, ok := properties["repositoryType"]
-	if !ok {
-		return nil, fmt.Errorf("repositoryType is required")
+	if err := parsedProperties.Validate(); err != nil {
+		return nil, err
 	}
 
 	var subscriptionRepository SubscriptionRepository
 	vapidPrivateKey, vapidPublicKey, _ := webpush.GenerateVAPIDKeys()
 
-	switch repositoryType {
+	switch parsedProperties.RepositoryType {
 	case "DynamoDB":
 		cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("ap-northeast-1"))
 		if err != nil {
@@ -107,14 +111,14 @@ func WebPushSenderBuilder(id string, properties map[string]interface{}) (abstrac
 	case "InMemory":
 		subscriptionRepository = NewInMemorySubscriptionRepository()
 	default:
-		return nil, fmt.Errorf("repositoryType is invalid. repositoryType: %s", repositoryType)
+		return nil, fmt.Errorf("repositoryType is invalid. repositoryType: %s", parsedProperties.RepositoryType)
 	}
 
 	return NewSender(&webPushSenderImpl{
 		id:                     id,
 		logger:                 nil,
-		listenAddress:          listenAddrStr,
-		defaultSubscriber:      defaultSubscriberStr,
+		listenAddress:          parsedProperties.ListenAddress,
+		defaultSubscriber:      parsedProperties.DefaultSubscriber,
 		subscriptionRepository: subscriptionRepository,
 		vapidPrivateKey:        vapidPrivateKey,
 		vapidPublicKey:         vapidPublicKey,

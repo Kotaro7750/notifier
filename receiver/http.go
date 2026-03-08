@@ -9,22 +9,35 @@ import (
 
 	"github.com/Kotaro7750/notifier/abstraction"
 	"github.com/Kotaro7750/notifier/notification"
+
+	"gopkg.in/yaml.v3"
 )
 
-func HTTPReceiverBuilder(id string, properties map[string]interface{}) (abstraction.AbstractChannelComponent, error) {
-	listenAddr, ok := properties["listenAddress"]
-	if !ok {
-		return nil, fmt.Errorf("listenAddress is required")
+type HTTPReceiverProperties struct {
+	ListenAddress string `yaml:"listenAddress"`
+}
+
+func (p HTTPReceiverProperties) Validate() error {
+	if p.ListenAddress == "" {
+		return fmt.Errorf("listenAddress is required")
 	}
 
-	listenAddrStr, ok := listenAddr.(string)
-	if !ok {
-		return nil, fmt.Errorf("listenAddress should be string")
+	return nil
+}
+
+func HTTPReceiverBuilder(id string, properties yaml.Node) (abstraction.AbstractChannelComponent, error) {
+	var parsedProperties HTTPReceiverProperties
+	if err := abstraction.DecodeProperties(properties, &parsedProperties); err != nil {
+		return nil, err
+	}
+
+	if err := parsedProperties.Validate(); err != nil {
+		return nil, err
 	}
 
 	return NewReceiver(&HTTPReceiverImpl{
 		id:         id,
-		listenAddr: listenAddrStr,
+		listenAddr: parsedProperties.ListenAddress,
 		logger:     nil,
 	}), nil
 }

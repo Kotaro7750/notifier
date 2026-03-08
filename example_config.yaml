@@ -2,7 +2,7 @@ receivers:
   - id: 1
     kind: dummy
     properties:
-      errorInterval: 10s
+      errorInterval: 0s
       shutdownDuration: 0s
   - id: 2
     kind: HTTP
