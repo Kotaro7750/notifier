@@ -1,8 +1,6 @@
 package abstraction
 
 import (
-	"bytes"
-	"fmt"
 	"log/slog"
 
 	"github.com/Kotaro7750/notifier/notification"
@@ -11,52 +9,20 @@ import (
 
 type AbstractChannelComponentBuilder func(id string, properties yaml.Node) (AbstractChannelComponent, error)
 
+// AbstractChannelComponent is a single execution unit managed by AutonomousChannelComponent.
+// Implementations process notifications until they stop by error or done, and report that
+// result through the channel returned by Start. They do not own restart or supervision logic.
 type AbstractChannelComponent interface {
 	GetId() string
 	GetLogger() *slog.Logger
 	SetLogger(logger *slog.Logger)
+	// Start begins one execution of the component.
+	// ch is the component's notification channel: receivers write notifications to it and
+	// senders read notifications from it.
+	// done is closed by the supervisor to request shutdown. Implementations should stop
+	// accepting new work, finish their own shutdown processing, and then exit.
+	// The returned channel reports the end of this execution. Send one non-nil error when
+	// the execution ends by failure, or close the channel without sending when it ends
+	// normally. Implementations should then return and must not restart themselves.
 	Start(ch chan notification.Notification, done <-chan struct{}) <-chan error
-}
-
-// AbstractChannelComponentConfig holds the first-stage decoded YAML for a channel component.
-// The top-level config is decoded into this shared shape first, and Properties is then
-// decoded a second time into a component-specific typed properties struct inside each builder.
-type AbstractChannelComponentConfig struct {
-	Id         string    `yaml:"id"`
-	Kind       string    `yaml:"kind"`
-	Properties yaml.Node `yaml:"properties"`
-}
-
-func (c *AbstractChannelComponentConfig) Validate() error {
-	if c.Id == "" {
-		return fmt.Errorf("id is required")
-	}
-
-	if c.Kind == "" {
-		return fmt.Errorf("kind is required")
-	}
-
-	return nil
-}
-
-// Helper function to decode properties of AbstractChannelComponentConfig into concrete Configuration struct
-func DecodeProperties(properties yaml.Node, target any) error {
-	// If properties is unset, skip decoding
-	if properties.Kind == 0 {
-		return nil
-	}
-
-	body, err := yaml.Marshal(properties)
-	if err != nil {
-		return fmt.Errorf("marshal properties: %w", err)
-	}
-
-	decoder := yaml.NewDecoder(bytes.NewReader(body))
-	decoder.KnownFields(true)
-
-	if err := decoder.Decode(target); err != nil {
-		return fmt.Errorf("decode properties: %w", err)
-	}
-
-	return nil
 }

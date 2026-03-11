@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -11,47 +10,11 @@ import (
 
 	"github.com/Kotaro7750/notifier/abstraction"
 	"github.com/Kotaro7750/notifier/builder"
+	"github.com/Kotaro7750/notifier/config"
 	"github.com/Kotaro7750/notifier/notification"
 
 	"gopkg.in/yaml.v3"
 )
-
-type Configuration struct {
-	ReceiverConfigurations []abstraction.AbstractChannelComponentConfig `yaml:"receivers,flow"`
-	SenderConfigurations   []abstraction.AbstractChannelComponentConfig `yaml:"senders,flow"`
-}
-
-func validateConfiguration(config Configuration) error {
-	if config.ReceiverConfigurations == nil {
-		return fmt.Errorf("receivers is not defined")
-	}
-
-	if len(config.ReceiverConfigurations) == 0 {
-		return fmt.Errorf("At least one receiver is required")
-	}
-
-	for _, receiverConfig := range config.ReceiverConfigurations {
-		if err := receiverConfig.Validate(); err != nil {
-			return err
-		}
-	}
-
-	if config.SenderConfigurations == nil {
-		return fmt.Errorf("senders is not defined")
-	}
-
-	if len(config.SenderConfigurations) == 0 {
-		return fmt.Errorf("At least one sender is required")
-	}
-
-	for _, senderConfig := range config.SenderConfigurations {
-		if err := senderConfig.Validate(); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
 
 var Logger = slog.New(slog.NewJSONHandler(os.Stdout, nil))
 
@@ -68,16 +31,16 @@ func main() {
 		return
 	}
 
-	config := Configuration{}
+	cfg := config.Configuration{}
 	decoder := yaml.NewDecoder(bytes.NewReader(fileContent))
 	decoder.KnownFields(true)
-	err = decoder.Decode(&config)
+	err = decoder.Decode(&cfg)
 	if err != nil {
 		Logger.Error("Error parsing YAML file", "err", err)
 		return
 	}
 
-	if err := validateConfiguration(config); err != nil {
+	if err := cfg.Validate(); err != nil {
 		Logger.Error("Invalid configuration", "err", err)
 		return
 	}
@@ -85,7 +48,7 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, os.Interrupt, os.Kill)
 
-	receivers, senders, err := builder.Build(Logger, config.ReceiverConfigurations, config.SenderConfigurations)
+	receivers, senders, err := builder.Build(Logger, cfg.ReceiverConfigurations, cfg.SenderConfigurations)
 
 	if err != nil {
 		Logger.Error("Error in build", "error", err)

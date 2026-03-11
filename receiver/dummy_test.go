@@ -24,6 +24,12 @@ func TestDummyReceiverBuilderUsesDefaults(t *testing.T) {
 	if impl.receiveInterval != 1*time.Second {
 		t.Fatalf("receiveInterval = %v, want %v", impl.receiveInterval, 1*time.Second)
 	}
+	if impl.notificationSource != "" {
+		t.Fatalf("notificationSource = %q, want empty", impl.notificationSource)
+	}
+	if impl.labels != nil {
+		t.Fatalf("labels = %v, want nil", impl.labels)
+	}
 }
 
 func TestDummyReceiverBuilderUsesTypedProperties(t *testing.T) {
@@ -31,6 +37,10 @@ func TestDummyReceiverBuilderUsesTypedProperties(t *testing.T) {
 errorInterval: 0s
 shutdownDuration: 2s
 receiveInterval: 3s
+notification_source: billing
+labels:
+  env: prod
+  team: ops
 `)
 
 	component, err := DummyReceiverBuilder("receiver-1", properties)
@@ -47,6 +57,15 @@ receiveInterval: 3s
 	}
 	if impl.receiveInterval != 3*time.Second {
 		t.Fatalf("receiveInterval = %v, want %v", impl.receiveInterval, 3*time.Second)
+	}
+	if impl.notificationSource != "billing" {
+		t.Fatalf("notificationSource = %q, want %q", impl.notificationSource, "billing")
+	}
+	if got := impl.labels["env"]; got != "prod" {
+		t.Fatalf("labels[env] = %q, want %q", got, "prod")
+	}
+	if got := impl.labels["team"]; got != "ops" {
+		t.Fatalf("labels[team] = %q, want %q", got, "ops")
 	}
 }
 

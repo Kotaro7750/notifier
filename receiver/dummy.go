@@ -6,15 +6,18 @@ import (
 	"time"
 
 	"github.com/Kotaro7750/notifier/abstraction"
+	"github.com/Kotaro7750/notifier/config"
 	"github.com/Kotaro7750/notifier/notification"
 
 	"gopkg.in/yaml.v3"
 )
 
 type DummyReceiverProperties struct {
-	ErrorInterval    time.Duration `yaml:"errorInterval"`
-	ShutdownDuration time.Duration `yaml:"shutdownDuration"`
-	ReceiveInterval  time.Duration `yaml:"receiveInterval"`
+	ErrorInterval      time.Duration     `yaml:"errorInterval"`
+	ShutdownDuration   time.Duration     `yaml:"shutdownDuration"`
+	ReceiveInterval    time.Duration     `yaml:"receiveInterval"`
+	NotificationSource string            `yaml:"notification_source"`
+	Labels             map[string]string `yaml:"labels"`
 }
 
 func NewDummyReceiverProperties() DummyReceiverProperties {
@@ -41,7 +44,7 @@ func (p DummyReceiverProperties) Validate() error {
 
 func DummyReceiverBuilder(id string, properties yaml.Node) (abstraction.AbstractChannelComponent, error) {
 	parsedProperties := NewDummyReceiverProperties()
-	if err := abstraction.DecodeProperties(properties, &parsedProperties); err != nil {
+	if err := config.DecodeProperties(properties, &parsedProperties); err != nil {
 		return nil, err
 	}
 	if err := parsedProperties.Validate(); err != nil {
@@ -49,20 +52,24 @@ func DummyReceiverBuilder(id string, properties yaml.Node) (abstraction.Abstract
 	}
 
 	return NewReceiver(&dummyReceiverImpl{
-		id:               id,
-		logger:           nil,
-		errorInterval:    parsedProperties.ErrorInterval,
-		shutdownDuration: parsedProperties.ShutdownDuration,
-		receiveInterval:  parsedProperties.ReceiveInterval,
+		id:                 id,
+		logger:             nil,
+		errorInterval:      parsedProperties.ErrorInterval,
+		shutdownDuration:   parsedProperties.ShutdownDuration,
+		receiveInterval:    parsedProperties.ReceiveInterval,
+		notificationSource: parsedProperties.NotificationSource,
+		labels:             parsedProperties.Labels,
 	}), nil
 }
 
 type dummyReceiverImpl struct {
-	id               string
-	logger           *slog.Logger
-	errorInterval    time.Duration
-	shutdownDuration time.Duration
-	receiveInterval  time.Duration
+	id                 string
+	logger             *slog.Logger
+	errorInterval      time.Duration
+	shutdownDuration   time.Duration
+	receiveInterval    time.Duration
+	notificationSource string
+	labels             map[string]string
 }
 
 func (dri *dummyReceiverImpl) GetId() string {
@@ -105,9 +112,11 @@ func (dri *dummyReceiverImpl) Start(outputCh chan<- notification.Notification, d
 			select {
 			case <-receiveTickCh:
 				outputCh <- notification.Notification{
-					Title:    "Dummy Title",
-					Message:  fmt.Sprintf("Hello from %s", dri.id),
-					Severity: slog.LevelInfo,
+					Title:              "Dummy Title",
+					Message:            fmt.Sprintf("Hello from %s", dri.id),
+					Severity:           slog.LevelInfo,
+					NotificationSource: dri.notificationSource,
+					Labels:             dri.labels,
 				}
 
 			case <-errorTickCh:

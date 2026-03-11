@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/Kotaro7750/notifier/abstraction"
+	"github.com/Kotaro7750/notifier/config"
 	"github.com/Kotaro7750/notifier/receiver"
 	"github.com/Kotaro7750/notifier/sender"
 )
@@ -26,8 +27,8 @@ func init() {
 
 func Build(
 	baseLogger *slog.Logger,
-	receiverConfigs []abstraction.AbstractChannelComponentConfig,
-	senderConfigs []abstraction.AbstractChannelComponentConfig,
+	receiverConfigs []config.ChannelComponentConfig,
+	senderConfigs []config.ChannelComponentConfig,
 ) (
 	receivers []*abstraction.AutonomousChannelComponent,
 	senders []*abstraction.AutonomousChannelComponent,
@@ -65,6 +66,13 @@ func Build(
 			return nil, nil, fmt.Errorf("failed to build sender id: %s, kind: %s, error: %s", config.Id, config.Kind, err.Error())
 		}
 		component.SetLogger(baseLogger.With("type", "sender", "kind", config.Kind, "id", component.GetId()))
+		if config.Match != nil && config.Match.HasConditions() {
+			senderComponent, ok := component.(*sender.Sender)
+			if !ok {
+				return nil, nil, fmt.Errorf("sender id: %s, kind: %s does not support sender match", config.Id, config.Kind)
+			}
+			senderComponent.SetMatch(*config.Match)
+		}
 
 		senders = append(senders, abstraction.NewAutonomousChannelComponent(component))
 	}

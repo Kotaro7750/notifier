@@ -8,6 +8,8 @@ import (
 	"github.com/Kotaro7750/notifier/notification"
 )
 
+// AutonomousChannelComponent supervises an AbstractChannelComponent and owns its runtime
+// lifecycle, including start, restart after failure, and coordinated shutdown.
 type AutonomousChannelComponent struct {
 	chanComponent  AbstractChannelComponent
 	ch             chan notification.Notification

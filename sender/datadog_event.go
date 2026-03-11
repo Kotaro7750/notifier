@@ -11,6 +11,7 @@ import (
 	"github.com/DataDog/datadog-api-client-go/v2/api/datadog"
 	"github.com/DataDog/datadog-api-client-go/v2/api/datadogV1"
 	"github.com/Kotaro7750/notifier/abstraction"
+	"github.com/Kotaro7750/notifier/config"
 	"github.com/Kotaro7750/notifier/notification"
 
 	"gopkg.in/yaml.v3"
@@ -46,7 +47,7 @@ func (p DatadogEventSenderProperties) eventsURL() string {
 
 func DatadogEventSenderBuilder(id string, properties yaml.Node) (abstraction.AbstractChannelComponent, error) {
 	var parsedProperties DatadogEventSenderProperties
-	if err := abstraction.DecodeProperties(properties, &parsedProperties); err != nil {
+	if err := config.DecodeProperties(properties, &parsedProperties); err != nil {
 		return nil, err
 	}
 

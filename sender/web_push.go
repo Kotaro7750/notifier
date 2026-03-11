@@ -10,11 +10,12 @@ import (
 	"sync"
 
 	"github.com/Kotaro7750/notifier/abstraction"
+	"github.com/Kotaro7750/notifier/config"
 	"github.com/Kotaro7750/notifier/notification"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
@@ -42,7 +43,7 @@ func (p WebPushSenderProperties) Validate() error {
 
 func WebPushSenderBuilder(id string, properties yaml.Node) (abstraction.AbstractChannelComponent, error) {
 	var parsedProperties WebPushSenderProperties
-	if err := abstraction.DecodeProperties(properties, &parsedProperties); err != nil {
+	if err := config.DecodeProperties(properties, &parsedProperties); err != nil {
 		return nil, err
 	}
 
@@ -55,7 +56,7 @@ func WebPushSenderBuilder(id string, properties yaml.Node) (abstraction.Abstract
 
 	switch parsedProperties.RepositoryType {
 	case "DynamoDB":
-		cfg, err := config.LoadDefaultConfig(context.Background(), config.WithRegion("ap-northeast-1"))
+		cfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion("ap-northeast-1"))
 		if err != nil {
 			return nil, fmt.Errorf("Load AWS config failed. err: %s", err)
 		}
