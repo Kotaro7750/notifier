@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -18,6 +19,8 @@ import (
 )
 
 const defaultDatadogEventRequestTimeout = 10 * time.Second
+const datadogSiteEnvVar = "DD_SITE"
+const datadogAPIKeyEnvVar = "DD_API_KEY"
 
 type DatadogEventSenderProperties struct {
 	Site   string `yaml:"site"`
@@ -50,6 +53,7 @@ func DatadogEventSenderBuilder(id string, properties yaml.Node) (abstraction.Abs
 	if err := config.DecodeProperties(properties, &parsedProperties); err != nil {
 		return nil, err
 	}
+	parsedProperties = parsedProperties.withEnvFallback()
 
 	if err := parsedProperties.Validate(); err != nil {
 		return nil, err
@@ -84,6 +88,16 @@ func DatadogEventSenderBuilder(id string, properties yaml.Node) (abstraction.Abs
 		ctx:       ctx,
 		eventsAPI: datadogV1.NewEventsApi(datadog.NewAPIClient(configuration)),
 	}), nil
+}
+
+func (p DatadogEventSenderProperties) withEnvFallback() DatadogEventSenderProperties {
+	if strings.TrimSpace(p.Site) == "" {
+		p.Site = os.Getenv(datadogSiteEnvVar)
+	}
+	if strings.TrimSpace(p.APIKey) == "" {
+		p.APIKey = os.Getenv(datadogAPIKeyEnvVar)
+	}
+	return p
 }
 
 type datadogEventSenderImpl struct {

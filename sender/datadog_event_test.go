@@ -39,6 +39,47 @@ apiKey: test-api-key
 	}
 }
 
+func TestDatadogEventSenderBuilderUsesEnvironmentFallback(t *testing.T) {
+	t.Setenv("DD_SITE", "datadoghq.eu")
+	t.Setenv("DD_API_KEY", "env-api-key")
+
+	component, err := DatadogEventSenderBuilder("sender-1", test_util.MustPropertiesNode(t, `{}`))
+	if err != nil {
+		t.Fatalf("DatadogEventSenderBuilder returned error: %v", err)
+	}
+
+	impl := component.(*Sender).impl.(*datadogEventSenderImpl)
+	if impl.site != "datadoghq.eu" {
+		t.Fatalf("site = %q, want %q", impl.site, "datadoghq.eu")
+	}
+	if impl.apiKey != "env-api-key" {
+		t.Fatalf("apiKey = %q, want %q", impl.apiKey, "env-api-key")
+	}
+}
+
+func TestDatadogEventSenderBuilderPrefersPropertiesOverEnvironment(t *testing.T) {
+	t.Setenv("DD_SITE", "datadoghq.eu")
+	t.Setenv("DD_API_KEY", "env-api-key")
+
+	properties := test_util.MustPropertiesNode(t, `
+site: datadoghq.com
+apiKey: test-api-key
+`)
+
+	component, err := DatadogEventSenderBuilder("sender-1", properties)
+	if err != nil {
+		t.Fatalf("DatadogEventSenderBuilder returned error: %v", err)
+	}
+
+	impl := component.(*Sender).impl.(*datadogEventSenderImpl)
+	if impl.site != "datadoghq.com" {
+		t.Fatalf("site = %q, want %q", impl.site, "datadoghq.com")
+	}
+	if impl.apiKey != "test-api-key" {
+		t.Fatalf("apiKey = %q, want %q", impl.apiKey, "test-api-key")
+	}
+}
+
 func TestDatadogEventSenderBuilderRequiresAPIKey(t *testing.T) {
 	properties := test_util.MustPropertiesNode(t, `
 site: datadoghq.com
